@@ -4,7 +4,8 @@
  * Not "an agent" — infrastructure for safely SELLING to agents: a resource that
  * serves only requests that are PAID (x402 on Sui) AND backed by a proven UNIQUE
  * human (PoR), then lets the agent REMEMBER (Walrus) and REASON about it (local
- * LLM). No centralized dependency anywhere in the stack.
+ * LLM). Trust-minimized: non-custodial + on-chain-verifiable, with local inference
+ * (verification is trustless; liveness still uses hosted facilitator + relayer).
  *
  *   node --env-file=.env --import tsx src/demo.ts
  *
@@ -94,7 +95,7 @@ async function main() {
 
   await srv.close();
   console.log(`╚══ the full stack: PoR identity · x402 payment · Walrus memory · local brain ══╝`);
-  console.log(`    self-sovereign end-to-end — no centralized dependency. See spec/ for the proposed x402 extension.\n`);
+  console.log(`    trust-minimized — non-custodial, on-chain-verifiable, local inference. See spec/ for the proposed x402 extension.\n`);
 }
 
 main().catch((e) => {

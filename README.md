@@ -4,8 +4,9 @@
 
 A resource server that serves only requests which are **paid** (x402 on Sui) **and**
 backed by a **proven unique human** (Proof of Real) — then lets the agent **remember**
-(Walrus Memory) and **reason** about its spending (a **local** LLM). The whole stack
-is self-sovereign: no centralized dependency anywhere — not even for inference.
+(Walrus Memory) and **reason** about its spending (a **local** LLM). The stack is
+**trust-minimized**: non-custodial payments, on-chain-verifiable identity and
+settlement, and local inference (see *Trust model* for what's still hosted).
 
 > Payment proves *funds*. It does not prove *who is behind the request*. A paid
 > endpoint is still trivially sybil-farmed. This gate adds "one real, unique human
@@ -57,6 +58,15 @@ This composition wants to be a **standard**, not a one-off. See
 a sketch for an x402 extension where any resource can require a personhood proof
 alongside payment, composable with the settlement-receipt binding work
 ([#2666](https://github.com/x402-foundation/x402/pull/2666)).
+
+## Trust model — what "trust-minimized" does and doesn't mean
+
+**Verification is trustless:** the settlement is recomputed on-chain (don't trust the
+facilitator), and the credential + uniqueness proof are on-chain objects anyone can
+read. **Liveness and issuance are not (yet) decentralized:** the x402 facilitator and
+the Walrus Memory relayer are hosted services, and credential issuance depends on a
+trusted attestor. Only inference is fully local. So "self-sovereign" here means
+*non-custodial + on-chain-verifiable + local reasoning* — not "no servers."
 
 ## Honest scope
 
