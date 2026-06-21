@@ -1,0 +1,27 @@
+{
+  "name": "verified-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sui-native Verified Agent — PoR identity + x402 payments + Walrus Memory. B0 = the verified gate (paid AND personhood-proven).",
+  "scripts": {
+    "init": "tsx src/init.ts",
+    "demo": "tsx src/demo-b0.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten-incubation/memwal": "^0.0.7",
+    "@mysten/sui": "^2.19.0",
+    "por-sdk": "^0.4.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

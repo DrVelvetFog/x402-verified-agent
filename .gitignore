@@ -1,0 +1,9 @@
+# secrets — agent keypairs, never commit
+.secrets/
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+*.log
