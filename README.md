@@ -31,7 +31,7 @@ Personhood is checked **before** settlement (an un-verified agent never pays), a
 the settlement is **recomputed** on-chain (don't trust the facilitator). The paying
 key *is* the identity we check — no client-claimed addresses.
 
-## Four self-sovereign layers
+## Four trust-minimized layers
 
 | Layer | What | Built on |
 |-------|------|----------|
@@ -65,7 +65,7 @@ alongside payment, composable with the settlement-receipt binding work
 facilitator), and the credential + uniqueness proof are on-chain objects anyone can
 read. **Liveness and issuance are not (yet) decentralized:** the x402 facilitator and
 the Walrus Memory relayer are hosted services, and credential issuance depends on a
-trusted attestor. Only inference is fully local. So "self-sovereign" here means
+trusted attestor. Only inference is fully local. So "trust-minimized" here means
 *non-custodial + on-chain-verifiable + local reasoning* — not "no servers."
 
 ## Honest scope
