@@ -15,8 +15,8 @@ importers:
         specifier: ^2.19.0
         version: 2.19.0(typescript@5.9.3)
       por-sdk:
-        specifier: ^0.4.0
-        version: 0.4.0(typescript@5.9.3)
+        specifier: ^0.8.0
+        version: 0.8.0(typescript@5.9.3)
       tsx:
         specifier: ^4.19.0
         version: 4.22.4
@@ -335,8 +335,8 @@ packages:
     resolution: {integrity: sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA==}
     engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
 
-  por-sdk@0.4.0:
-    resolution: {integrity: sha512-JZ0Ts1JkmLc0ALgg4qxmLPMLOUdZSbWTcU3C6IS9qwT9s7MG/IFFMccpF2WD6QaecwBVoP8s5yRrId7mymEDCw==}
+  por-sdk@0.8.0:
+    resolution: {integrity: sha512-9CInKxWfLO2x4Kidy3+/A+mTHkeY8zKmN3iGcpG6GBCmlQsRsPJYvGnMUJPed/AFPtAvZ6pxBlJhEiE7upz4xQ==}
 
   poseidon-lite@0.2.1:
     resolution: {integrity: sha512-xIr+G6HeYfOhCuswdqcFpSX47SPhm0EpisWJ6h7fHlWwaVIvH3dLnejpatrtw6Xc6HaLrpq05y7VRfvDmDGIog==}
@@ -646,7 +646,7 @@ snapshots:
 
   graphql@16.14.2: {}
 
-  por-sdk@0.4.0(typescript@5.9.3):
+  por-sdk@0.8.0(typescript@5.9.3):
     dependencies:
       '@mysten/sui': 1.45.2(typescript@5.9.3)
     transitivePeerDependencies:
