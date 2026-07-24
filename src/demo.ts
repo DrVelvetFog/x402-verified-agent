@@ -72,6 +72,14 @@ async function main() {
   }
   console.log(`  ↳ only the PAID *and* UNIQUE-HUMAN agent got in. Sybils and bots can't buy.\n`);
 
+  // SKIP_ACT2=1 stops after the gate (e.g. while the Walrus Memory relayer is
+  // down, or to record just the identity+payments story).
+  if (process.env.SKIP_ACT2) {
+    await srv.close();
+    console.log(`  (Act 2 — cross-session memory + local-brain spend control — is also built; skipped here.)\n`);
+    return;
+  }
+
   // ── ACT 2: MEMORY + LOCAL BRAIN — the verified agent gets smarter ──────
   console.log(`▌ ACT 2 — the verified agent remembers, and reasons locally about spending\n`);
   const memory = new AgentMemory(verified.toSuiAddress(), "flagship");
