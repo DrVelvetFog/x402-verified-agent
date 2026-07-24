@@ -16,11 +16,14 @@ import { getFaucetHost, requestSuiFromFaucetV2 } from "@mysten/sui/faucet";
 import { fromBase64, toBase64 } from "@mysten/sui/utils";
 
 export const SUI = "0x2::sui::SUI";
-export const TESTNET_RPC = "https://fullnode.testnet.sui.io:443";
-export const MAINNET_RPC = "https://fullnode.mainnet.sui.io:443";
+// fullnode.{testnet,mainnet}.sui.io JSON-RPC was retired (~Jul 2026, returns 404).
+// Default to a live public JSON-RPC provider; override with SUI_RPC.
+export const TESTNET_RPC = "https://sui-testnet-rpc.publicnode.com";
+export const MAINNET_RPC = "https://sui-rpc.publicnode.com";
 
 const isMainnet = (network: string) => network === "sui:mainnet";
-export const rpcFor = (network: string) => (isMainnet(network) ? MAINNET_RPC : TESTNET_RPC);
+export const rpcFor = (network: string) =>
+  process.env.SUI_RPC ?? (isMainnet(network) ? MAINNET_RPC : TESTNET_RPC);
 
 export type Requirements = {
   scheme: "exact";

@@ -4,8 +4,12 @@
  * (on-chain, no centralized trust) at a minimum assurance level.
  */
 import { PorClient, TESTNET, Level } from "por-sdk";
+import { getClient } from "./lib.js";
 
-const por = new PorClient({ deployment: TESTNET });
+// por-sdk otherwise defaults to fullnode.testnet.sui.io, whose JSON-RPC was
+// retired (~Jul 2026, returns 404). Inject the app's client (live endpoint,
+// SUI_RPC-overridable) so the personhood reads hit a working fullnode.
+const por = new PorClient({ deployment: TESTNET, suiClient: getClient("sui:testnet") as any });
 
 export { Level };
 
