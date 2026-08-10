@@ -13,6 +13,8 @@ import http from "node:http";
 import { Requirements, SignedPayment, encodeHeader, decodeHeader, payerOf, short, rpcFor, onchainNetToPayTo } from "./lib.js";
 import { checkPersonhood, levelName, Level } from "./por-gate.js";
 import { classifyCaller, type CallerClass, type CallerKind } from "./caller-kind.js";
+import { signAttestation } from "./governor.js";
+import type { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 export type VerifiedSellerConfig = {
   facilitatorUrl: string;
@@ -29,6 +31,12 @@ export type VerifiedSellerConfig = {
    * a PoR-verified-human-only gate at the flat `amount`.
    */
   prices?: Record<CallerKind, string>;
+  /**
+   * Governor (M2): when set, the seller SIGNS its AGENT-PASSPORT attestation with
+   * this key so a client can verify the gate was enforced, rather than trusting
+   * the operator. Without it, the attestation is returned unsigned (back-compat).
+   */
+  signer?: Ed25519Keypair;
   resource: { url: string; description: string; mimeType: string };
   data: unknown;
 };
@@ -176,22 +184,29 @@ export async function startVerifiedSeller(
 
     // gate passed + settlement verified -> serve
     if (passport) {
-      log(`served: paid (digest ${short(digest)}) as Kind ${passport.kind.toUpperCase()}`);
-      return send(
-        200,
-        {
-          "PAYMENT-RESPONSE": encodeHeader(settle),
-          "AGENT-PASSPORT": encodeHeader({
-            kind: passport.kind,
-            human: passport.human,
-            porLevel: passport.porLevel,
-            memwalAccountId: passport.memwalAccountId,
-            reason: passport.reason,
-            recomputedNet: net.toString(),
-          }),
-        },
-        cfg.data,
-      );
+      const attestation = {
+        kind: passport.kind,
+        human: passport.human,
+        porLevel: passport.porLevel,
+        memwalAccountId: passport.memwalAccountId,
+        reason: passport.reason,
+        recomputedNet: net.toString(),
+        digest,
+        resource: cfg.resource.url,
+      };
+      const headers: Record<string, string> = { "PAYMENT-RESPONSE": encodeHeader(settle) };
+      if (cfg.signer) {
+        // Governor: sign the attestation so the client can verify enforcement.
+        const signed = await signAttestation(cfg.signer, attestation);
+        headers["AGENT-PASSPORT"] = signed.payload;
+        headers["AGENT-PASSPORT-SIG"] = signed.sig;
+        headers["AGENT-PASSPORT-BY"] = signed.by;
+        log(`served: paid (digest ${short(digest)}) as Kind ${passport.kind.toUpperCase()} · attestation signed by ${short(signed.by)}`);
+      } else {
+        headers["AGENT-PASSPORT"] = encodeHeader(attestation);
+        log(`served: paid (digest ${short(digest)}) as Kind ${passport.kind.toUpperCase()} (attestation UNSIGNED)`);
+      }
+      return send(200, headers, cfg.data);
     }
     log(`served: paid (digest ${short(digest)}) AND verified (${levelName(por!.level)}${por!.unique ? " · unique human" : ""})`);
     return send(

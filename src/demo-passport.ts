@@ -24,6 +24,7 @@ import {
 } from "./lib.js";
 import { startVerifiedSeller } from "./verified-seller.js";
 import type { CallerKind } from "./caller-kind.js";
+import { verifyAttestation } from "./governor.js";
 
 const NETWORK = "sui:testnet";
 const FACILITATOR = process.env.FACILITATOR_URL ?? "https://sui-facilitator.onrender.com";
@@ -39,7 +40,7 @@ async function buyAsKind(
   myKind: CallerKind,
   memwalAccount: string | undefined,
   onStep: (m: string) => void,
-): Promise<{ served: boolean; status: number; passport?: any; digest?: string; error?: string }> {
+): Promise<{ served: boolean; status: number; passport?: any; digest?: string; error?: string; sigOk?: boolean; by?: string }> {
   const first = await fetch(url);
   if (first.status !== 402) throw new Error(`expected 402, got ${first.status}`);
   const h = first.headers.get("payment-required");
@@ -56,11 +57,20 @@ async function buyAsKind(
   const paid = await fetch(url, { headers });
   if (paid.status === 200) {
     const ph = paid.headers.get("agent-passport");
+    const sig = paid.headers.get("agent-passport-sig");
+    const by = paid.headers.get("agent-passport-by");
     const rh = paid.headers.get("payment-response");
-    const passport: any = ph ? decodeHeader(ph) : {};
+    let passport: any = ph ? decodeHeader(ph) : {};
+    let sigOk: boolean | undefined;
+    if (ph && sig && by) {
+      const v = await verifyAttestation({ payload: ph, sig, by });
+      sigOk = v.ok;
+      passport = v.attestation;
+    }
     const settle: any = rh ? decodeHeader(rh) : {};
-    onStep(`200 OK — served as ${String(passport.kind).toUpperCase()}, settled ${short(settle.transaction ?? "")}`);
-    return { served: true, status: 200, passport, digest: settle.transaction };
+    const sigNote = sigOk === undefined ? " · attestation UNSIGNED" : ` · attestation sig ${sigOk ? "✓ verified" : "✗ INVALID"}`;
+    onStep(`200 OK — served as ${String(passport.kind).toUpperCase()}, settled ${short(settle.transaction ?? "")}${sigNote}`);
+    return { served: true, status: 200, passport, digest: settle.transaction, sigOk, by: by ?? undefined };
   }
   const err: any = await paid.json().catch(() => ({}));
   onStep(`${paid.status} — ${err.error ?? "rejected"}`);
@@ -83,7 +93,7 @@ async function main() {
   const srv = await startVerifiedSeller(
     {
       facilitatorUrl: FACILITATOR, network: NETWORK, asset: SUI, amount: PRICES.autonomous,
-      payTo: seller.toSuiAddress(), prices: PRICES, requireUnique: false,
+      payTo: seller.toSuiAddress(), prices: PRICES, requireUnique: false, signer: seller,
       resource: { url: "http://seller/premium", description: "premium data feed", mimeType: "application/json" },
       data: { alpha: "agents that remember compound", servedAt: new Date().toISOString() },
     },
@@ -104,6 +114,7 @@ async function main() {
     if (r.served) {
       console.log(`    → ✅ ${String(r.passport.kind).toUpperCase()} · paid ${PRICES[r.passport.kind as CallerKind]} MIST · net ${r.passport.recomputedNet} recomputed on-chain`);
       if (r.passport.human) console.log(`       human behind it: ${short(r.passport.human)}${r.passport.porLevel !== undefined ? ` (PoR L${r.passport.porLevel})` : ""}`);
+      console.log(`       governor: attestation ${r.sigOk ? "✓ signed + verified" : "✗ signature INVALID"} by seller ${short(r.by ?? "")}`);
       console.log(`       ${explorerUrl(NETWORK, r.digest!)}\n`);
     } else {
       console.log(`    → ⛔ ${r.status} — ${r.error}\n`);
