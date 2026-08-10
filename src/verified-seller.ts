@@ -13,7 +13,7 @@ import http from "node:http";
 import { Requirements, SignedPayment, encodeHeader, decodeHeader, payerOf, short, rpcFor, onchainNetToPayTo } from "./lib.js";
 import { checkPersonhood, levelName, Level } from "./por-gate.js";
 import { classifyCaller, type CallerClass, type CallerKind } from "./caller-kind.js";
-import { signAttestation } from "./governor.js";
+import { signAttestation, enforceGovernor } from "./governor.js";
 import type { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 export type VerifiedSellerConfig = {
@@ -37,6 +37,13 @@ export type VerifiedSellerConfig = {
    * the operator. Without it, the attestation is returned unsigned (back-compat).
    */
   signer?: Ed25519Keypair;
+  /**
+   * Governor (M2.2): when true, a caller must present a valid human-signed
+   * GovernorPolicy (bound to the on-chain human behind it) or be rejected before
+   * settlement. When false, a presented policy is still enforced, but its absence
+   * is allowed. Pricing mode only.
+   */
+  requireGovernor?: boolean;
   resource: { url: string; description: string; mimeType: string };
   data: unknown;
 };
@@ -139,6 +146,30 @@ export async function startVerifiedSeller(
       }
     }
 
+    // ── governor gate (M2.2): enforce the human-signed spending policy ────────
+    let governor: Record<string, unknown> | undefined;
+    if (passport) {
+      const g = await enforceGovernor(
+        (n) => {
+          const h = req.headers[n];
+          return typeof h === "string" ? h : undefined;
+        },
+        { payer, human: passport.human, required, resourceUrl: cfg.resource.url },
+      );
+      if (g.present && !g.ok) {
+        log(`governor: ✗ ${g.reason} — refusing before settlement`);
+        return send(403, {}, { x402Version: 2, error: `governor blocked: ${g.reason}`, kind: passport.kind });
+      }
+      if (!g.present && cfg.requireGovernor) {
+        log(`governor: ✗ required but no policy presented`);
+        return send(403, {}, { x402Version: 2, error: "governor policy required but none presented", kind: passport.kind });
+      }
+      if (g.present && g.ok) {
+        governor = g.governor as Record<string, unknown>;
+        log(`governor: ✓ policy by ${short(String(governor.policyBy))} · spendCapOk ${governor.spendCapOk} · approvalOk ${governor.approvalOk}`);
+      }
+    }
+
     // ── payment gate: settle the signed tx against the price for this caller ──
     const reqs = reqFor(required, passport?.kind);
     const settleBody = {
@@ -193,6 +224,7 @@ export async function startVerifiedSeller(
         recomputedNet: net.toString(),
         digest,
         resource: cfg.resource.url,
+        ...(governor ? { governor } : {}),
       };
       const headers: Record<string, string> = { "PAYMENT-RESPONSE": encodeHeader(settle) };
       if (cfg.signer) {
