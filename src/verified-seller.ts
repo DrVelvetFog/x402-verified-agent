@@ -12,6 +12,7 @@
 import http from "node:http";
 import { Requirements, SignedPayment, encodeHeader, decodeHeader, payerOf, short, rpcFor, onchainNetToPayTo } from "./lib.js";
 import { checkPersonhood, levelName, Level } from "./por-gate.js";
+import { classifyCaller, type CallerClass, type CallerKind } from "./caller-kind.js";
 
 export type VerifiedSellerConfig = {
   facilitatorUrl: string;
@@ -21,6 +22,13 @@ export type VerifiedSellerConfig = {
   payTo: string;
   minLevel?: Level;
   requireUnique?: boolean;
+  /**
+   * Agent Passport caller-type pricing. When set, the seller serves EVERYONE but
+   * prices by the payer's Kind (human / hybrid / autonomous), classified on-chain
+   * from the identity graph. When omitted, the seller keeps its original behavior:
+   * a PoR-verified-human-only gate at the flat `amount`.
+   */
+  prices?: Record<CallerKind, string>;
   resource: { url: string; description: string; mimeType: string };
   data: unknown;
 };
@@ -39,16 +47,20 @@ export async function startVerifiedSeller(
   const minLevel = cfg.minLevel ?? Level.DeviceHuman;
   const requireUnique = cfg.requireUnique ?? false;
 
-  const requirements = (): Requirements => ({
+  const reqFor = (amount: string, kindTag?: CallerKind): Requirements => ({
     scheme: "exact",
     network: cfg.network,
-    amount: cfg.amount,
+    amount,
     asset: cfg.asset,
     payTo: cfg.payTo,
     maxTimeoutSeconds: 60,
     // advertise the personhood requirement so an agent knows what it needs
-    extra: { personhood: { scheme: "por", network: cfg.network, minLevel, unique: requireUnique } },
+    extra: {
+      personhood: { scheme: "por", network: cfg.network, minLevel, unique: requireUnique },
+      ...(kindTag ? { callerKind: kindTag } : {}),
+    },
   });
+  const requirements = (): Requirements => reqFor(cfg.amount);
 
   const server = http.createServer(async (req, res) => {
     const send = (code: number, headers: Record<string, string>, body: unknown) => {
@@ -58,13 +70,19 @@ export async function startVerifiedSeller(
 
     const sig = req.headers["payment-signature"];
 
-    // unpaid -> 402 with terms (incl. the personhood requirement)
+    // unpaid -> 402 with terms. In pricing mode, advertise one tier per Kind so a
+    // caller knows what it must pay; otherwise the single flat requirement.
     if (typeof sig !== "string" || !sig.length) {
+      const accepts = cfg.prices
+        ? (Object.keys(cfg.prices) as CallerKind[]).map((k) => reqFor(cfg.prices![k], k))
+        : [requirements()];
       const body = {
         x402Version: 2,
-        error: "PAYMENT-SIGNATURE header is required; this resource also requires a PoR-verified payer",
+        error: cfg.prices
+          ? "PAYMENT-SIGNATURE header is required; price depends on your Agent Passport Kind (human/hybrid/autonomous). Present a MEMWAL-ACCOUNT header to claim the hybrid tier."
+          : "PAYMENT-SIGNATURE header is required; this resource also requires a PoR-verified payer",
         resource: cfg.resource,
-        accepts: [requirements()],
+        accepts,
       };
       return send(402, { "PAYMENT-REQUIRED": encodeHeader(body) }, body);
     }
@@ -76,28 +94,45 @@ export async function startVerifiedSeller(
       return send(400, {}, { error: "PAYMENT-SIGNATURE is not valid base64 JSON" });
     }
 
-    // ── personhood gate (runs BEFORE settlement) ──────────────────────────
+    // ── identity gate (runs BEFORE settlement) ────────────────────────────
     let payer: string;
     try {
       payer = payerOf(client.payload);
     } catch (e: any) {
       return send(400, {}, { error: `could not read payer from payment: ${e?.message ?? e}` });
     }
-    const por = await checkPersonhood(payer, minLevel, requireUnique);
-    log(`gate: payer ${short(payer)} → PoR ${por.verified ? `✓ ${levelName(por.level)}${por.unique ? " · unique" : ""}` : "✗ " + por.reason}`);
-    if (!por.verified) {
-      // reject without settling — the un-verified agent does not pay
-      return send(403, {}, {
-        x402Version: 2,
-        error: "verified-agent gate: payer is not a PoR-verified human",
-        payer,
-        personhood: por,
-        required: { scheme: "por", minLevel: levelName(minLevel) },
+
+    // What must this caller pay, and (legacy mode) may it buy at all?
+    let required = cfg.amount;
+    let passport: CallerClass | undefined;
+    let por: Awaited<ReturnType<typeof checkPersonhood>> | undefined;
+
+    if (cfg.prices) {
+      // Agent Passport pricing: serve everyone, priced by Kind (classified on-chain).
+      const hint = req.headers["memwal-account"];
+      passport = await classifyCaller(payer, {
+        memwalAccountId: typeof hint === "string" && hint.length ? hint : undefined,
       });
+      required = cfg.prices[passport.kind];
+      log(`gate: payer ${short(payer)} → Kind ${passport.kind.toUpperCase()} (${passport.reason}) · price ${required}`);
+    } else {
+      // Legacy: PoR-verified-human-only gate — reject before settling.
+      por = await checkPersonhood(payer, minLevel, requireUnique);
+      log(`gate: payer ${short(payer)} → PoR ${por.verified ? `✓ ${levelName(por.level)}${por.unique ? " · unique" : ""}` : "✗ " + por.reason}`);
+      if (!por.verified) {
+        // reject without settling — the un-verified agent does not pay
+        return send(403, {}, {
+          x402Version: 2,
+          error: "verified-agent gate: payer is not a PoR-verified human",
+          payer,
+          personhood: por,
+          required: { scheme: "por", minLevel: levelName(minLevel) },
+        });
+      }
     }
 
-    // ── payment gate: settle the signed tx against OUR terms ──────────────
-    const reqs = requirements();
+    // ── payment gate: settle the signed tx against the price for this caller ──
+    const reqs = reqFor(required, passport?.kind);
     const settleBody = {
       x402Version: 2,
       paymentPayload: { x402Version: 2, resource: cfg.resource, accepted: reqs, payload: client.payload },
@@ -133,14 +168,32 @@ export async function startVerifiedSeller(
     } catch (e: any) {
       return send(502, {}, { error: `settlement recompute failed: ${e?.message ?? e}` });
     }
-    if (net < BigInt(cfg.amount)) {
-      log(`recompute: ✗ net ${net} < required ${cfg.amount} — refusing to serve`);
-      return send(402, {}, { x402Version: 2, error: "settlement recompute mismatch", recomputedNet: net.toString(), required: cfg.amount });
+    if (net < BigInt(required)) {
+      log(`recompute: ✗ net ${net} < required ${required} — refusing to serve`);
+      return send(402, {}, { x402Version: 2, error: "settlement recompute mismatch", recomputedNet: net.toString(), required });
     }
-    log(`recompute: ✓ net ${net} to payTo matches required ${cfg.amount}`);
+    log(`recompute: ✓ net ${net} to payTo matches required ${required}`);
 
-    // both gates passed + settlement verified -> serve
-    log(`served: paid (digest ${short(digest)}) AND verified (${levelName(por.level)}${por.unique ? " · unique human" : ""})`);
+    // gate passed + settlement verified -> serve
+    if (passport) {
+      log(`served: paid (digest ${short(digest)}) as Kind ${passport.kind.toUpperCase()}`);
+      return send(
+        200,
+        {
+          "PAYMENT-RESPONSE": encodeHeader(settle),
+          "AGENT-PASSPORT": encodeHeader({
+            kind: passport.kind,
+            human: passport.human,
+            porLevel: passport.porLevel,
+            memwalAccountId: passport.memwalAccountId,
+            reason: passport.reason,
+            recomputedNet: net.toString(),
+          }),
+        },
+        cfg.data,
+      );
+    }
+    log(`served: paid (digest ${short(digest)}) AND verified (${levelName(por!.level)}${por!.unique ? " · unique human" : ""})`);
     return send(
       200,
       { "PAYMENT-RESPONSE": encodeHeader(settle), "POR-VERIFIED": encodeHeader({ ...por, recomputedNet: net.toString() }) },

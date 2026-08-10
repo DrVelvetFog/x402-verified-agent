@@ -16,7 +16,7 @@ importers:
         version: 2.19.0(typescript@5.9.3)
       por-sdk:
         specifier: ^0.8.0
-        version: 0.8.0(typescript@5.9.3)
+        version: 0.8.1(typescript@5.9.3)
       tsx:
         specifier: ^4.19.0
         version: 4.22.4
@@ -335,8 +335,8 @@ packages:
     resolution: {integrity: sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA==}
     engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
 
-  por-sdk@0.8.0:
-    resolution: {integrity: sha512-9CInKxWfLO2x4Kidy3+/A+mTHkeY8zKmN3iGcpG6GBCmlQsRsPJYvGnMUJPed/AFPtAvZ6pxBlJhEiE7upz4xQ==}
+  por-sdk@0.8.1:
+    resolution: {integrity: sha512-VPwbsZPMWp8Nl89En/WMTX6ZwI3k7Fx9oPoyLRUfEvhckRh0Lw7ZHCMNqoPaDLLW7wGmsTXgC+CHSfhAFkdmWQ==}
 
   poseidon-lite@0.2.1:
     resolution: {integrity: sha512-xIr+G6HeYfOhCuswdqcFpSX47SPhm0EpisWJ6h7fHlWwaVIvH3dLnejpatrtw6Xc6HaLrpq05y7VRfvDmDGIog==}
@@ -356,6 +356,14 @@ packages:
 
   valibot@1.4.1:
     resolution: {integrity: sha512-klCmFTz2jeDluy9RwX+F884TCiogtdBJ/YaxSx1EOBYXa3NXNWj8kR1jjN8rzluwojJVWWaHJ4r1U5LfICnM3g==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  valibot@1.4.2:
+    resolution: {integrity: sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg==}
     peerDependencies:
       typescript: '>=5'
     peerDependenciesMeta:
@@ -509,7 +517,7 @@ snapshots:
       gql.tada: 1.11.2(graphql@16.14.2)(typescript@5.9.3)
       graphql: 16.14.2
       poseidon-lite: 0.2.1
-      valibot: 1.4.1(typescript@5.9.3)
+      valibot: 1.4.2(typescript@5.9.3)
     transitivePeerDependencies:
       - '@gql.tada/svelte-support'
       - '@gql.tada/vue-support'
@@ -646,7 +654,7 @@ snapshots:
 
   graphql@16.14.2: {}
 
-  por-sdk@0.8.0(typescript@5.9.3):
+  por-sdk@0.8.1(typescript@5.9.3):
     dependencies:
       '@mysten/sui': 1.45.2(typescript@5.9.3)
     transitivePeerDependencies:
@@ -667,5 +675,9 @@ snapshots:
   undici-types@6.21.0: {}
 
   valibot@1.4.1(typescript@5.9.3):
+    optionalDependencies:
+      typescript: 5.9.3
+
+  valibot@1.4.2(typescript@5.9.3):
     optionalDependencies:
       typescript: 5.9.3
