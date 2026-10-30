@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import type { VaClient } from "./lib.js";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
   getClient, loadKeypair, ensureGas, SUI, short, explorerUrl,
@@ -38,7 +38,7 @@ function govHeaders(policy?: SignedAttestation, approval?: SignedAttestation): R
 }
 
 async function call(
-  url: string, client: SuiJsonRpcClient, payer: Ed25519Keypair,
+  url: string, client: VaClient, payer: Ed25519Keypair,
   memwalAccount: string, extra: Record<string, string>,
 ): Promise<{ served: boolean; status: number; governor?: any; error?: string; digest?: string }> {
   const first = await fetch(url);

@@ -9,17 +9,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import { getFaucetHost, requestSuiFromFaucetV2 } from "@mysten/sui/faucet";
 import { fromBase64, toBase64 } from "@mysten/sui/utils";
 
 export const SUI = "0x2::sui::SUI";
-// fullnode.{testnet,mainnet}.sui.io JSON-RPC was retired (~Jul 2026, returns 404).
-// Default to a live public JSON-RPC provider; override with SUI_RPC.
-export const TESTNET_RPC = "https://sui-testnet-rpc.publicnode.com";
-export const MAINNET_RPC = "https://sui-rpc.publicnode.com";
+// Sui JSON-RPC is fully retired (official fullnodes ~Jul 2026, publicnode
+// ~Oct 2026). gRPC on the official fullnode hosts is the supported transport;
+// override with SUI_RPC (a gRPC base URL).
+export const TESTNET_RPC = "https://fullnode.testnet.sui.io:443";
+export const MAINNET_RPC = "https://fullnode.mainnet.sui.io:443";
 
 const isMainnet = (network: string) => network === "sui:mainnet";
 export const rpcFor = (network: string) =>
@@ -38,11 +39,69 @@ export type SignedPayment = { transaction: string; signature: string };
 
 const secretsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".secrets");
 
-export function getClient(network = "sui:testnet"): SuiJsonRpcClient {
-  return new SuiJsonRpcClient({
-    url: process.env.SUI_RPC ?? rpcFor(network),
-    network: isMainnet(network) ? "mainnet" : "testnet",
-  });
+/**
+ * gRPC client behind the small JSON-RPC-shaped surface this repo already
+ * consumes, so call sites didn't have to change when JSON-RPC was retired:
+ * getBalance/getLatestSuiSystemState/getChainIdentifier/getObject/
+ * signAndExecuteTransaction keep their old shapes; `grpc` is the real client
+ * (what `tx.build({ client })` takes).
+ */
+export class VaClient {
+  readonly grpc: SuiGrpcClient;
+  constructor(network: "mainnet" | "testnet", baseUrl: string) {
+    this.grpc = new SuiGrpcClient({ network, baseUrl });
+  }
+  get core() { return this.grpc.core; }
+
+  async getBalance(input: { owner: string; coinType?: string }): Promise<{ totalBalance: string }> {
+    const r = await this.grpc.core.getBalance(input);
+    return { totalBalance: r.balance.balance };
+  }
+  async getLatestSuiSystemState(): Promise<{ epoch: string }> {
+    const r = await this.grpc.core.getCurrentSystemState();
+    return { epoch: String(r.systemState.epoch) };
+  }
+  async getChainIdentifier(): Promise<string> {
+    return (await this.grpc.core.getChainIdentifier()).chainIdentifier;
+  }
+  /** JSON-RPC getObject shape, for the fields this repo reads (owner, type). */
+  async getObject(input: { id: string; options?: unknown }): Promise<any> {
+    const r = await this.grpc.core.getObject({ objectId: input.id });
+    const o: any = r.object;
+    const owner = o?.owner?.$kind === "Shared"
+      ? { Shared: { initial_shared_version: o.owner.Shared?.initialSharedVersion } }
+      : o?.owner;
+    return { data: { objectId: o?.objectId, type: o?.type, owner } };
+  }
+  /** JSON-RPC signAndExecuteTransaction shape: effects.status, digest, and
+   * objectChanges with `type: "created"` + objectType (fetched per id). */
+  async signAndExecuteTransaction(input: { transaction: Transaction; signer: Ed25519Keypair; options?: unknown }): Promise<any> {
+    const r: any = await this.grpc.signAndExecuteTransaction({
+      transaction: input.transaction,
+      signer: input.signer,
+      include: { effects: true },
+    });
+    const tx: any = r?.$kind === "Transaction" ? r.Transaction : r?.FailedTransaction ?? r;
+    const ok = tx?.status?.success === true;
+    const createdIds: string[] = (tx?.effects?.changedObjects ?? [])
+      .filter((c: any) => c.idOperation === "Created")
+      .map((c: any) => c.objectId);
+    let objectChanges: any[] = [];
+    if (ok && createdIds.length) {
+      const objs = await this.grpc.core.getObjects({ objectIds: createdIds });
+      objectChanges = (objs.objects as any[]).map((o: any) =>
+        ({ type: "created", objectId: o?.objectId, objectType: o?.type }));
+    }
+    return {
+      digest: tx?.digest,
+      effects: { status: { status: ok ? "success" : "failure", error: tx?.status?.error?.message } },
+      objectChanges,
+    };
+  }
+}
+
+export function getClient(network = "sui:testnet"): VaClient {
+  return new VaClient(isMainnet(network) ? "mainnet" : "testnet", process.env.SUI_RPC ?? rpcFor(network));
 }
 
 /** Load (or create) a persisted testnet keypair under .secrets/ (gitignored). */
@@ -56,7 +115,7 @@ export function loadKeypair(name: string): Ed25519Keypair {
 }
 
 /** Best-effort testnet SUI faucet so an address has gas (and SUI to spend). */
-export async function ensureGas(client: SuiJsonRpcClient, addr: string): Promise<bigint> {
+export async function ensureGas(client: VaClient, addr: string): Promise<bigint> {
   let bal = BigInt((await client.getBalance({ owner: addr })).totalBalance);
   if (bal >= 50_000_000n) return bal;
   try {
@@ -71,16 +130,34 @@ export async function ensureGas(client: SuiJsonRpcClient, addr: string): Promise
 
 /** Build + sign a SUI payment of `amount` from `payer` to `to`. */
 export async function buildPayment(
-  client: SuiJsonRpcClient,
+  client: VaClient,
   payer: Ed25519Keypair,
   to: string,
   amount: bigint,
 ): Promise<SignedPayment> {
   const tx = new Transaction();
   tx.setSender(payer.toSuiAddress());
+  // The Sui exact scheme (x402 #3081) requires a ValidDuring expiration with
+  // both epochs set and a span of at most one; conformant facilitators reject
+  // a payment without one. Same construction the SDK's own resolver uses.
+  const [state, chain] = await Promise.all([
+    client.getLatestSuiSystemState(),
+    client.getChainIdentifier(),
+  ]);
+  const epoch = BigInt(state.epoch);
+  tx.setExpiration({
+    ValidDuring: {
+      minEpoch: String(epoch),
+      maxEpoch: String(epoch + 1n),
+      minTimestamp: null,
+      maxTimestamp: null,
+      chain,
+      nonce: Math.floor(Math.random() * 4294967296),
+    },
+  });
   const [coin] = tx.splitCoins(tx.gas, [amount]);
   tx.transferObjects([coin], to);
-  const bytes = await tx.build({ client });
+  const bytes = await tx.build({ client: client.grpc });
   const { signature } = await payer.signTransaction(bytes);
   return { transaction: toBase64(bytes), signature };
 }
@@ -110,18 +187,16 @@ export async function onchainNetToPayTo(
   payTo: string,
   asset: string,
 ): Promise<bigint> {
-  const res = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "sui_getTransactionBlock",
-      params: [digest, { showBalanceChanges: true, showEffects: true }],
-    }),
+  // gRPC: JSON-RPC's sui_getTransactionBlock is retired everywhere.
+  const grpc = new SuiGrpcClient({
+    network: rpcUrl.includes("testnet") ? "testnet" : "mainnet",
+    baseUrl: rpcUrl,
   });
-  const json: any = await res.json();
-  const bc: any[] = json?.result?.balanceChanges ?? [];
+  const r: any = await grpc.getTransaction({ digest, include: { balanceChanges: true } });
+  const tx: any = r?.$kind === "Transaction" ? r.Transaction : r?.FailedTransaction ?? r;
+  const bc: any[] = (tx?.balanceChanges ?? []).map((b: any) => ({
+    coinType: b.coinType, amount: b.amount, owner: { AddressOwner: b.address },
+  }));
   const eq = (a?: string, b?: string) => (a ?? "").toLowerCase() === (b ?? "").toLowerCase();
   let net = 0n;
   for (const c of bc) {

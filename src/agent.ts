@@ -3,7 +3,7 @@
  * Unlike the plain x402 buyer, this one does NOT throw on rejection — a 403 at
  * the personhood gate is an expected outcome we want to report, not an error.
  */
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import type { VaClient } from "./lib.js";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Requirements, buildPayment, encodeHeader, decodeHeader, short } from "./lib.js";
 
@@ -13,7 +13,7 @@ export type AgentResult =
 
 export async function agentBuy(
   resourceUrl: string,
-  client: SuiJsonRpcClient,
+  client: VaClient,
   payer: Ed25519Keypair,
   onStep: (msg: string) => void = () => {},
 ): Promise<AgentResult> {

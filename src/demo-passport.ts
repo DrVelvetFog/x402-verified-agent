@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import type { VaClient } from "./lib.js";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
   getClient, loadKeypair, ensureGas, SUI, short, explorerUrl,
@@ -35,7 +35,7 @@ const secretsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..",
 /** Pricing-aware buy: pick the tier for my Kind, pay it, (hybrid) present the account hint. */
 async function buyAsKind(
   url: string,
-  client: SuiJsonRpcClient,
+  client: VaClient,
   payer: Ed25519Keypair,
   myKind: CallerKind,
   memwalAccount: string | undefined,
